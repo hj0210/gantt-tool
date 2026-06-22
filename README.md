@@ -47,11 +47,23 @@ gantt-tool/
 
 | 포맷 | 처리 방식 |
 |---|---|
-| Excel (.xlsx, .xls) | 텍스트로 변환 후 LLM 텍스트 파싱 |
+| Excel (.xlsx, .xls) | 시트가 여러 개면 LLM이 실제 WBS 시트를 먼저 골라낸 뒤(`_select_wbs_sheet`), 명시적 시작/종료 날짜 컬럼이 있는 표 구조면 **LLM 호출 없이** 셀 좌표로 직접 추출(`_excel_table_to_dict`), 구조가 불명확하면 텍스트 LLM 파싱으로 폴백 |
 | JSON | 텍스트로 변환 후 LLM 텍스트 파싱 |
 | PDF | 텍스트 추출 후 LLM 텍스트 파싱 |
 | 이미지 (.png, .jpg) | base64 인코딩 후 LLM Vision 파싱 |
 | draw.io (.drawio) | **LLM 호출 없이** 셀 좌표(x/y/width/height)와 날짜 헤더만으로 직접 복원 |
+
+### Excel 결정적 파싱 상세
+
+`parser._excel_table_to_dict`는 drawio 파서와 같은 원리로 동작한다:
+- 날짜 헤더 대신 "시작"/"종료" 키워드가 들어간 헤더 행을 찾는다.
+- 그 왼쪽의, 데이터가 있는 컬럼들을 좌(넓은 분류)→우(좁은 분류) 순서의 계층으로 본다.
+- 병합 셀로 들여쓰기한 템플릿(분류명만 있고 하위 항목이 없는 "롤업 행"으로 구간을 표시하는 방식)과
+  모든 행에 파트명이 그대로 적힌 플랫 테이블 방식을 자동 감지해서 각각 다르게 처리한다.
+- 날짜가 비어 있는 행도 누락시키지 않고 프로젝트 시작일로 기본값을 채워 포함한다.
+- 실제 75행짜리 KT WBS 엑셀(병합 셀 4단계 들여쓰기 구조)로 검증해 75/75 완전 일치, 9개 파트로
+  정확히 분리됨을 확인함. 같은 파일을 LLM 텍스트 파싱으로만 처리했을 때는 모델이 큰 표를
+  요약해버려 21~50개로 누락되는 문제가 있었음 — 이게 결정적 파서를 만든 이유.
 
 draw.io 입력은 우리 렌더러와 같은 레이아웃 규칙(라벨 영역 너비, 주 단위 그리드, 월요일 날짜 헤더)을
 쓰는 drawio 파일이면 그리드 스케일을 파일에서 자체적으로 추정해 동작한다 (`parser._drawio_to_dict`).
@@ -130,6 +142,11 @@ pyinstaller --onefile --windowed main.py
 - [x] 라벨 텍스트 기본 굵게(draw.io fontStyle=1) 통일 — 소분류/작업명도 파트헤더·막대라벨과 동일하게
 - [x] draw.io 기본 폰트(Helvetica) 반영 — Windows엔 Helvetica가 없어 메트릭이 동일한 Arial로 대체,
       텍스트에 한글이 섞이면 자동으로 맑은 고딕으로 분기 (`renderer._font_for`)
+- [x] PyInstaller exe 빌드 + 실행 검증 완료 (`dist/GanttTool.exe`, 키 없을 때 다이얼로그 정상 등장)
+- [x] git 저장소 생성 + GitHub push (https://github.com/hj0210/gantt-tool), `v0.1.0` 태그
+- [x] 엑셀 다중 시트 자동 선택 (`_select_wbs_sheet`) — 표지/변경이력/휴일 등 제외하고 WBS 시트만 인식
+- [x] 엑셀 결정적(LLM 미사용) 테이블 추출 (`_excel_table_to_dict`) — 실제 75행 WBS 파일로
+      완전성(75/75) 검증, 병합 셀/플랫 테이블 두 스타일 모두 자동 감지
 - [ ] JSON/Excel/drawio 내보내기 GUI 버튼 동작 수동 확인 (현재는 renderer/exporter 단위 테스트만 완료)
 - [ ] 패키징 전 `settings.clear_all()`로 개발용 키 제거 (위 "exe 패키징" 절차 참고)
 - [ ] PyInstaller exe 패키징 테스트
