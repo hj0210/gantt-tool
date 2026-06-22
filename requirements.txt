@@ -1,0 +1,10 @@
+PyQt6>=6.6.0
+openpyxl>=3.1.0
+Pillow>=10.0.0
+pypdf>=4.0.0
+pyinstaller>=6.0.0
+
+# LLM 프로바이더 SDK (필요한 것만 설치해도 됨 - 선택한 프로바이더만 사용)
+anthropic>=0.40.0
+openai>=1.50.0
+google-generativeai>=0.8.0
