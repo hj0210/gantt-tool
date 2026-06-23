@@ -289,7 +289,6 @@ class GanttRenderer:
 
     def _draw_date_header(self, draw: ImageDraw.ImageDraw):
         y0 = config.DATE_HEADER_Y
-        y1 = y0 + config.DATE_HEADER_HEIGHT
         for i, w in enumerate(self.weeks):
             x = config.LABEL_WIDTH + i * config.WEEK_WIDTH
             label = f"{w.month}/{w.day}"

@@ -1,8 +1,11 @@
 """WBS 입력 파일(Excel/JSON/이미지/PDF)을 LLM(Claude/GPT/Gemini 중 선택)으로 파싱하여
 간트차트 렌더링에 필요한 구조화된 데이터(part > subgroup > task)로 변환한다.
 """
+import datetime as _dt
 import json
 import os
+import re as _re
+import xml.etree.ElementTree as _ET
 
 import openpyxl
 
@@ -200,8 +203,6 @@ def _select_wbs_sheet(wb) -> str:
 # 넓은 범주->좁은 범주 순서의 계층 컬럼(보통 병합 셀로 들여쓰기 표현)을 갖는
 # 흔한 템플릿이면, LLM 없이 셀 좌표만으로 100% 정확하게 파트>소분류>작업을 복원한다.
 # (LLM은 큰 표를 만나면 일부 행을 요약/생략하는 경향이 있어 완전성을 보장 못 함)
-import datetime as _dt
-import re as _re
 
 _START_KEYWORDS = ("시작", "start")
 _END_KEYWORDS = ("종료", "완료", "end", "finish")
@@ -431,10 +432,6 @@ def _image_media_type(path: str) -> str:
 # 셀의 x/y/width/height 좌표만으로 파트>소분류>작업 계층과 날짜를 그대로 복원할 수 있다.
 # 날짜 헤더 2개 이상의 x좌표 간격으로 그리드 스케일을 그 파일 기준으로 스스로 추정하므로
 # 우리 config 상수와 다른 px 스케일을 쓴 drawio라도 동작한다.
-
-import datetime as _dt
-import re as _re
-import xml.etree.ElementTree as _ET
 
 _DATE_HEADER_RE = _re.compile(r"^\d{1,2}/\d{1,2}$")
 
