@@ -172,11 +172,30 @@ class GanttRenderer:
 
     def __init__(self, data: WBSData):
         self.data = data
-        self.grid_start = _week_start(data.project_start)
-        self.grid_end = data.project_end
+        actual_start, actual_end = self._actual_date_range()
+        self.grid_start = _week_start(actual_start)
+        self.grid_end = actual_end
         self.weeks = self._compute_weeks()
         self.content_width = config.LABEL_WIDTH + len(self.weeks) * config.WEEK_WIDTH
         self.content_height = self._compute_content_height()
+
+    def _actual_date_range(self) -> tuple:
+        """data.project_start/end는 작업을 추가/수정해도 자동으로 따라 갱신되지 않을 수 있다
+        (예: '새로 만들기'로 만든 기본 날짜 그대로 두고 작업 날짜만 바꾼 경우). 그리드가
+        실제 작업 날짜 범위보다 좁아서 막대가 라벨 영역에 겹치거나 화면 밖으로 사라지는
+        문제를 막기 위해, 렌더링 시점에 항상 모든 작업의 실제 최소/최대 날짜로 다시 계산한다."""
+        dates = [
+            d
+            for part in self.data.parts
+            for sg in part.subgroups
+            for task in sg.tasks
+            for d in (task.start_date, task.end_date)
+        ]
+        if not dates:
+            return self.data.project_start, self.data.project_end
+        start = min(dates + [self.data.project_start])
+        end = max(dates + [self.data.project_end])
+        return start, end
 
     # ---- 좌표 계산 ----
 
