@@ -6,7 +6,7 @@ import io
 import os
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QKeyEvent, QPixmap
+from PyQt6.QtGui import QAction, QColor, QKeyEvent, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -234,48 +235,81 @@ class WBSTableWidget(QTableWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WBS → 간트차트 생성기")
+        self.project_name = "새 프로젝트"
         self.resize(1400, 800)
 
         self.data: WBSData | None = None
         self.worker: ParseWorker | None = None
 
         self._build_ui()
+        self._update_title()
+
+    def _update_title(self):
+        self.setWindowTitle(f"{self.project_name} - WBS → 간트차트 생성기")
 
     # ---- UI 구성 ----
 
     def _build_ui(self):
+        self._build_menu_bar()
+
         toolbar = QToolBar()
         self.addToolBar(toolbar)
-
-        open_btn = QPushButton("파일 열기 (Excel/JSON/이미지/PDF)")
-        open_btn.clicked.connect(self.on_open_file)
-        toolbar.addWidget(open_btn)
 
         refresh_btn = QPushButton("미리보기 갱신")
         refresh_btn.clicked.connect(self.on_refresh_preview)
         toolbar.addWidget(refresh_btn)
 
-        export_btn = QPushButton("PNG로 내보내기")
-        export_btn.clicked.connect(self.on_export_png)
-        toolbar.addWidget(export_btn)
-
-        export_json_btn = QPushButton("JSON으로 내보내기")
-        export_json_btn.clicked.connect(self.on_export_json)
-        toolbar.addWidget(export_json_btn)
-
-        export_excel_btn = QPushButton("Excel로 내보내기")
-        export_excel_btn.clicked.connect(self.on_export_excel)
-        toolbar.addWidget(export_excel_btn)
-
-        export_drawio_btn = QPushButton("draw.io로 내보내기")
-        export_drawio_btn.clicked.connect(self.on_export_drawio)
-        toolbar.addWidget(export_drawio_btn)
-
         api_key_btn = QPushButton("API 키 변경")
         api_key_btn.clicked.connect(self.on_change_api_key)
         toolbar.addWidget(api_key_btn)
 
+        central = self._build_central_widget()
+        self.setCentralWidget(central)
+        self.statusBar().showMessage("준비됨")
+
+    def _build_menu_bar(self):
+        file_menu = self.menuBar().addMenu("파일")
+
+        new_action = QAction("새로 만들기", self)
+        new_action.triggered.connect(self.on_new_project)
+        file_menu.addAction(new_action)
+
+        rename_action = QAction("이름 바꾸기", self)
+        rename_action.triggered.connect(self.on_rename_project)
+        file_menu.addAction(rename_action)
+
+        copy_action = QAction("복사본 만들기", self)
+        copy_action.triggered.connect(self.on_make_copy)
+        file_menu.addAction(copy_action)
+
+        file_menu.addSeparator()
+
+        import_action = QAction("다음에서 가져오기... (Excel/JSON/PDF/이미지/draw.io)", self)
+        import_action.triggered.connect(self.on_open_file)
+        file_menu.addAction(import_action)
+
+        file_menu.addSeparator()
+
+        export_menu = file_menu.addMenu("다른 형식으로 내보내기")
+        export_specs = [
+            ("JSON", self.on_export_json),
+            ("HTML", self.on_export_html),
+            ("draw.io", self.on_export_drawio),
+            ("PNG", self.on_export_png),
+            ("Excel", self.on_export_excel),
+        ]
+        for label, handler in export_specs:
+            action = QAction(label, self)
+            action.triggered.connect(handler)
+            export_menu.addAction(action)
+
+        file_menu.addSeparator()
+
+        close_action = QAction("닫기", self)
+        close_action.triggered.connect(self.close)
+        file_menu.addAction(close_action)
+
+    def _build_central_widget(self) -> QWidget:
         central = QWidget()
         layout = QHBoxLayout(central)
 
@@ -308,9 +342,42 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(left_widget, 2)
         layout.addWidget(scroll, 3)
+        return central
 
-        self.setCentralWidget(central)
-        self.statusBar().showMessage("준비됨")
+    # ---- 파일 메뉴: 새로 만들기 / 이름 바꾸기 / 복사본 만들기 ----
+
+    def on_new_project(self):
+        if self.data is not None:
+            confirm = QMessageBox.question(
+                self, "새로 만들기",
+                "현재 작업 중인 내용은 저장하지 않으면 사라집니다. 새로 만들까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+
+        self.data = None
+        self.project_name = "새 프로젝트"
+        self._update_title()
+        self.table.setRowCount(0)
+        self.preview_label.setText("파일을 열어 WBS를 파싱하세요.")
+        self.preview_label.setPixmap(QPixmap())
+        self.statusBar().showMessage("새 프로젝트")
+
+    def on_rename_project(self):
+        new_name, ok = QInputDialog.getText(self, "이름 바꾸기", "프로젝트 이름:", text=self.project_name)
+        if ok and new_name.strip():
+            self.project_name = new_name.strip()
+            self._update_title()
+
+    def on_make_copy(self):
+        if not self.data:
+            QMessageBox.warning(self, "안내", "먼저 WBS 파일을 열어 파싱하세요.")
+            return
+        self.project_name = f"{self.project_name} (복사본)"
+        self._update_title()
+        self.statusBar().showMessage(f"'{self.project_name}'으로 복사됨")
 
     # ---- 파일 열기 / 파싱 ----
 
@@ -344,6 +411,9 @@ class MainWindow(QMainWindow):
             )
             if proceed != QMessageBox.StandardButton.Yes:
                 return
+
+        self.project_name = os.path.splitext(os.path.basename(path))[0]
+        self._update_title()
 
         self.statusBar().showMessage(f"파싱 중... ({path})")
         self.worker = ParseWorker(path)
@@ -647,6 +717,11 @@ class MainWindow(QMainWindow):
     def on_export_drawio(self):
         self._export_with(
             "draw.io로 저장", "gantt_chart.drawio", "draw.io (*.drawio)", exporter.export_drawio
+        )
+
+    def on_export_html(self):
+        self._export_with(
+            "HTML로 저장", "gantt_chart.html", "HTML (*.html)", exporter.export_html
         )
 
     def _export_with(self, dialog_title: str, default_name: str, file_filter: str, export_fn):

@@ -5,6 +5,8 @@ WBSData를 다른 포맷으로 재출력할 때 사용한다.
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 
 import openpyxl
@@ -56,3 +58,35 @@ def export_drawio(data: WBSData, path: str) -> None:
     xml = renderer.GanttRenderer(data).to_drawio_xml()
     with open(path, "w", encoding="utf-8") as f:
         f.write(xml)
+
+
+def export_png(data: WBSData, path: str) -> None:
+    renderer.render_to_png(data, path)
+
+
+def export_html(data: WBSData, path: str) -> None:
+    """렌더링한 PNG를 base64로 인라인 임베드한 단독 HTML 파일로 내보낸다.
+    브라우저에서 PNG 파일 없이 바로 열어볼 수 있다."""
+    img = renderer.render_to_image(data)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    b64 = base64.standard_b64encode(buf.getvalue()).decode("ascii")
+    width, height = img.size
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WBS 간트차트</title>
+<style>
+  body {{ margin: 0; background: #ffffff; }}
+  img {{ display: block; width: {width}px; height: {height}px; }}
+</style>
+</head>
+<body>
+<img src="data:image/png;base64,{b64}" alt="WBS 간트차트">
+</body>
+</html>
+"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
