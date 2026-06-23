@@ -35,7 +35,9 @@ def _load_raw() -> dict:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig: BOM이 붙은 채로 저장된 파일(예: 외부 도구나 PowerShell로 손으로
+        # 만든 경우)도 깨지지 않게 읽는다. BOM이 없는 일반 UTF-8도 그대로 잘 읽힌다.
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return {}
 

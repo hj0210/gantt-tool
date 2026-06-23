@@ -135,6 +135,12 @@ pyinstaller --onefile --windowed main.py
 - [x] "파일" 메뉴 구성 (새로 만들기/이름 바꾸기/복사본 만들기/가져오기/내보내기 하위메뉴/닫기)
       — 편집/보기 메뉴는 아직 보류 (undo/redo, 보기 옵션 등 생기면 추가)
 - [x] HTML 내보내기 추가 (`exporter.export_html`) — PNG를 base64로 인라인 임베드한 단독 HTML 파일
+- [x] **설정 파일이 BOM(UTF-8 with BOM)으로 저장돼도 깨지지 않게 보강** (`settings._load_raw`가
+      `utf-8-sig`로 읽음). 디버깅 중 PowerShell로 만든 테스트 파일이 BOM 때문에 조용히
+      파싱 실패 → 빈 설정으로 폴백되는 걸 발견함 (앱 자체 저장 경로는 BOM을 안 붙이므로
+      실사용자에겐 영향 없었지만, 외부 도구로 손으로 만든 설정 파일도 견고하게 처리하도록 방어)
+- [x] **실제 exe + 스크린샷으로 메인윈도우/파일 메뉴/내보내기 하위메뉴(JSON·HTML·draw.io·PNG·Excel)
+      클릭까지 시각적으로 전부 검증 완료**
 - [x] GUI 단독 실행 확인 (PyQt6 설치 후 `ApiKeyDialog`/`MainWindow` 생성 성공)
 - [x] OpenAI 키 저장 + 검증(`validate_api_key`) 성공 확인 (개발용 테스트 키)
 - [x] draw.io 입력 지원 (`parser._drawio_to_dict`) — 실제 외부 drawio 파일로 전체 플로우(파싱→렌더링) 검증 완료
