@@ -1,6 +1,7 @@
 """PyQt6 기반 WBS 간트차트 미리보기/수정 UI."""
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import io
 import os
@@ -240,6 +241,9 @@ class MainWindow(QMainWindow):
 
         self.data: WBSData | None = None
         self.worker: ParseWorker | None = None
+        self._undo_stack: list = []
+        self._redo_stack: list = []
+        self._UNDO_LIMIT = 50
 
         self._build_ui()
         self._update_title()
@@ -309,6 +313,18 @@ class MainWindow(QMainWindow):
         close_action.triggered.connect(self.close)
         file_menu.addAction(close_action)
 
+        edit_menu = self.menuBar().addMenu("편집")
+
+        self.undo_action = QAction("실행 취소", self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        self.undo_action.triggered.connect(self.on_undo)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction("다시 실행", self)
+        self.redo_action.setShortcut("Ctrl+Shift+Z")
+        self.redo_action.triggered.connect(self.on_redo)
+        edit_menu.addAction(self.redo_action)
+
     def _build_central_widget(self) -> QWidget:
         central = QWidget()
         layout = QHBoxLayout(central)
@@ -359,6 +375,8 @@ class MainWindow(QMainWindow):
 
         self.data = None
         self.project_name = "새 프로젝트"
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self._update_title()
         self.table.setRowCount(0)
         self.preview_label.setText("파일을 열어 WBS를 파싱하세요.")
@@ -428,6 +446,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "파싱 오류", f"파싱 결과 변환 실패: {e}")
             self.statusBar().showMessage("파싱 실패")
             return
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self.statusBar().showMessage("파싱 완료. 표를 확인하고 수정하세요.")
         self._populate_table()
         self.on_refresh_preview()
@@ -495,6 +515,7 @@ class MainWindow(QMainWindow):
         if not info:
             return
         kind, ref, _parent = info
+        self._push_undo()  # 더블클릭으로 시작하는 모든 편집(텍스트/날짜/색상) 전에 스냅샷
         if kind == ROW_PART and col == COL_COLOR:
             dialog = PartColorDialog(ref.color, self)
             if dialog.exec() and dialog.selected_color:
@@ -521,6 +542,42 @@ class MainWindow(QMainWindow):
                     ).date()
                 except ValueError:
                     pass
+
+    # ---- Undo/Redo ----
+    #
+    # WBSData 트리가 작아서(보통 task 수백 개 이내) 매번 전체를 깊은 복사해서
+    # 스냅샷으로 쌓는 방식이 세밀한 명령(Command) 객체를 만드는 것보다 훨씬
+    # 단순하고 버그 낼 일이 적다. 구조 변경(추가/삭제/색상)과 셀 편집 시작 직전에
+    # 한 번씩 스냅샷을 찍어 둔다.
+
+    def _push_undo(self):
+        if not self.data:
+            return
+        self._sync_table_to_data()
+        self._undo_stack.append(copy.deepcopy(self.data))
+        if len(self._undo_stack) > self._UNDO_LIMIT:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    def on_undo(self):
+        if not self._undo_stack or not self.data:
+            return
+        self._sync_table_to_data()
+        self._redo_stack.append(copy.deepcopy(self.data))
+        self.data = self._undo_stack.pop()
+        self._populate_table()
+        self.on_refresh_preview()
+        self.statusBar().showMessage("실행 취소했습니다.")
+
+    def on_redo(self):
+        if not self._redo_stack or not self.data:
+            return
+        self._sync_table_to_data()
+        self._undo_stack.append(copy.deepcopy(self.data))
+        self.data = self._redo_stack.pop()
+        self._populate_table()
+        self.on_refresh_preview()
+        self.statusBar().showMessage("다시 실행했습니다.")
 
     # ---- 행 추가/삭제 (Enter=작업 추가, Delete=삭제, 우클릭=메뉴) ----
 
@@ -552,7 +609,7 @@ class MainWindow(QMainWindow):
         kind, ref, parent = info
         if kind != ROW_TASK:
             return
-        self._sync_table_to_data()
+        self._push_undo()
         new_task = Task(name="새 작업", start_date=ref.start_date, end_date=ref.end_date)
         parent.tasks.insert(parent.tasks.index(ref) + 1, new_task)
         self._focus_and_rename(new_task)
@@ -581,7 +638,7 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
 
-        self._sync_table_to_data()
+        self._push_undo()
         if kind == ROW_TASK:
             parent.tasks.remove(ref)
         elif kind == ROW_SUBGROUP:
@@ -629,11 +686,12 @@ class MainWindow(QMainWindow):
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is None:
             return
-        self._sync_table_to_data()
 
         if chosen is act_delete:
             self._confirm_and_delete(kind, ref, parent)
             return
+
+        self._push_undo()
 
         if kind == ROW_TASK:
             if chosen is act_add_above or chosen is act_add_below:
