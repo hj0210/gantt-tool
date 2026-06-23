@@ -35,7 +35,7 @@ gantt-tool/
   main.py         # 진입점
   parser.py       # WBS 입력 파싱 오케스트레이션 (Excel/JSON/PDF/이미지 -> 구조화 데이터)
   llm_providers.py # Claude/GPT/Gemini 등 모델사별 API 호출 래퍼
-  settings.py     # 프로바이더별 API 키 저장/로드 (%APPDATA%\GanttTool\config.json)
+  settings.py     # 프로바이더별 API 키 저장/로드 (%LOCALAPPDATA%\GanttTool\config.json)
   renderer.py     # 간트차트 렌더링 (Pillow PNG + draw.io XML 생성)
   exporter.py     # 구조화 데이터 -> JSON/Excel/drawio 내보내기
   gui.py          # PyQt6 미리보기/수정 UI + API 키 다이얼로그
@@ -91,11 +91,15 @@ LLM 없이 100% 정확히 복원되고 한글 라벨도 정상 렌더링됨 (`re
 - exe/스크립트 실행 시 선택된 프로바이더의 키가 없으면 **앱이 직접 키 입력창을 띄운다**
   (취소하면 앱 종료).
 - 입력한 키는 즉시 최소 토큰 더미 API 호출로 유효성을 검증한 뒤
-  `%APPDATA%\GanttTool\config.json`에 프로바이더별로 평문 저장한다 (사용자 계정별로 분리).
+  `%LOCALAPPDATA%\GanttTool\config.json`에 프로바이더별로 평문 저장한다 (사용자 계정별로 분리).
 - 여러 프로바이더의 키를 동시에 저장해두고 필요할 때 전환할 수 있다.
 - 키/프로바이더를 바꾸고 싶으면 툴바의 `API 키 변경` 버튼으로 언제든 재설정 가능.
 - 프로바이더별 SDK(`anthropic`/`openai`/`google-generativeai`)는 선택해서 쓴 것만
   설치해도 동작한다 (lazy import).
+- **`%APPDATA%`(Roaming)가 아니라 `%LOCALAPPDATA%`를 쓴다.** 처음엔 Roaming에 저장했는데,
+  이 PC에서 `settings.clear_all()`로 지운 키 파일이 같은 옛 타임스탬프로 되돌아오는 현상을
+  실제로 겪었다 (백업/EDR 에이전트가 Roaming을 동기화하는 환경으로 추정). 키처럼 이 PC를
+  떠나면 안 되는 비밀값은 동기화되지 않는 LOCALAPPDATA에 두는 게 맞아서 옮겼다.
 
 ## 실행 방법
 
@@ -106,7 +110,7 @@ python main.py   # 최초 실행 시 API 키 입력창이 뜬다
 
 ## exe 패키징
 
-저장된 키는 `%APPDATA%\GanttTool\config.json`(런타임 사용자 설정 파일)에만 있고
+저장된 키는 `%LOCALAPPDATA%\GanttTool\config.json`(런타임 사용자 설정 파일)에만 있고
 이 폴더(소스 코드)에는 키가 전혀 존재하지 않으므로, PyInstaller가 패키징하는
 소스 파일에는 원래부터 키가 포함되지 않는다. 그래도 개발 중 사용한 테스트 키를
 실수로라도 남기지 않으려면 패키징 전에 한 번 비워두는 것을 권장:
@@ -147,6 +151,9 @@ pyinstaller --onefile --windowed main.py
 - [x] 엑셀 다중 시트 자동 선택 (`_select_wbs_sheet`) — 표지/변경이력/휴일 등 제외하고 WBS 시트만 인식
 - [x] 엑셀 결정적(LLM 미사용) 테이블 추출 (`_excel_table_to_dict`) — 실제 75행 WBS 파일로
       완전성(75/75) 검증, 병합 셀/플랫 테이블 두 스타일 모두 자동 감지
-- [ ] JSON/Excel/drawio 내보내기 GUI 버튼 동작 수동 확인 (현재는 renderer/exporter 단위 테스트만 완료)
-- [ ] 패키징 전 `settings.clear_all()`로 개발용 키 제거 (위 "exe 패키징" 절차 참고)
-- [ ] PyInstaller exe 패키징 테스트
+- [x] exe 재빌드 (행 추가/삭제, 색상 스와치, 결정적 엑셀 파서, 폰트 수정 반영된 최신 코드)
+- [x] **API 키 저장 위치를 `%APPDATA%`(Roaming) → `%LOCALAPPDATA%`로 변경.** Roaming에서
+      `clear_all()`로 지운 파일이 같은 타임스탬프로 되돌아오는 버그를 실제로 겪고 수정함
+      (소스 실행/exe 양쪽에서 키 없을 때 다이얼로그가 정상적으로 뜨는 것까지 재검증 완료)
+- [ ] 사용자가 직접 GUI를 마우스로 눌러보는 실사용 테스트 (지금까진 코드 시뮬레이션 위주)
+- [ ] PDF/JSON 입력도 실제(더미 아닌) 파일로 검증 — 지금은 Excel/drawio만 실제 파일로 검증함

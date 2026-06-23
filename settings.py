@@ -1,6 +1,10 @@
 """사용자별 로컬 설정 파일(프로바이더별 API 키 등) 저장/로드.
 
-Windows 기준 %APPDATA%\\GanttTool\\config.json 에 평문 저장한다.
+Windows 기준 %LOCALAPPDATA%\\GanttTool\\config.json 에 평문 저장한다.
+%APPDATA%(Roaming)가 아니라 %LOCALAPPDATA%를 쓰는 이유: Roaming 폴더는
+백업/EDR 에이전트나 그룹정책에 의해 동기화되는 환경이 흔해서, API 키 같은
+민감 정보가 의도치 않게 클라우드/백업 어딘가에 같이 남을 수 있다.
+LOCALAPPDATA는 이 PC를 떠나지 않는 로컬 전용 캐시 영역이라 비밀값 저장에 더 적합하다.
 exe로 패키징해도 사용자 계정 단위로 분리되어 저장되며, 다른 OS에서는
 홈 디렉터리(~/.gantt-tool/config.json)로 대체된다.
 
@@ -17,9 +21,9 @@ _APP_DIR_NAME = "GanttTool"
 
 
 def _config_dir() -> Path:
-    appdata = os.environ.get("APPDATA")
-    base = Path(appdata) if appdata else Path.home() / ".gantt-tool"
-    return base / _APP_DIR_NAME if appdata else base
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    base = Path(local_appdata) if local_appdata else Path.home() / ".gantt-tool"
+    return base / _APP_DIR_NAME if local_appdata else base
 
 
 def _config_path() -> Path:
