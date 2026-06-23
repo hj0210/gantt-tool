@@ -387,7 +387,9 @@ class MainWindow(QMainWindow):
         self.preview_label.drag_finished.connect(self.on_preview_drag_finished)
         scroll = QScrollArea()
         scroll.setWidget(self.preview_label)
-        scroll.setWidgetResizable(True)
+        # False로 둬야 라벨이 항상 pixmap 크기 그대로 유지된다(True면 뷰포트를 채우려고
+        # 늘어나면서 이미지가 가운데 정렬돼, 클릭 좌표와 이미지 픽셀 좌표가 어긋난다).
+        scroll.setWidgetResizable(False)
 
         layout.addWidget(left_widget, 2)
         layout.addWidget(scroll, 3)
