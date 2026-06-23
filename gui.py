@@ -7,7 +7,7 @@ import io
 import os
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QKeyEvent, QPixmap
+from PyQt6.QtGui import QAction, QColor, QKeyEvent, QMouseEvent, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -232,6 +232,32 @@ class WBSTableWidget(QTableWidget):
         super().keyPressEvent(event)
 
 
+class PreviewLabel(QLabel):
+    """간트차트 미리보기 이미지 위에서 직접 마우스로 작업 막대를 추가/이동/리사이즈할 수
+    있게 클릭+드래그 시작/끝 좌표를 신호로 내보내는 QLabel. 드래그 중 실시간 미리보기는
+    그리지 않고(구현 단순화를 위해 1차 버전에서는 생략), 누른 지점과 뗀 지점만으로
+    동작을 판단한다."""
+
+    drag_finished = pyqtSignal(int, int, int, int)  # press_x, press_y, release_x, release_y
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._press_pos: tuple | None = None
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = (int(event.position().x()), int(event.position().y()))
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton and self._press_pos is not None:
+            px, py = self._press_pos
+            rx, ry = int(event.position().x()), int(event.position().y())
+            self._press_pos = None
+            self.drag_finished.emit(px, py, rx, ry)
+        super().mouseReleaseEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -355,9 +381,10 @@ class MainWindow(QMainWindow):
         left_widget.setLayout(left)
         left_widget.setMinimumWidth(560)
 
-        # 우측: 미리보기
-        self.preview_label = QLabel("파일을 열어 WBS를 파싱하세요.")
+        # 우측: 미리보기 (드래그로 직접 작업 추가/이동/리사이즈 가능)
+        self.preview_label = PreviewLabel("파일을 열어 WBS를 파싱하세요.")
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.drag_finished.connect(self.on_preview_drag_finished)
         scroll = QScrollArea()
         scroll.setWidget(self.preview_label)
         scroll.setWidgetResizable(True)
@@ -379,15 +406,24 @@ class MainWindow(QMainWindow):
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-        self.data = None
+        today = dt.date.today()
+        starter_task = Task(name="새 작업", start_date=today, end_date=today + dt.timedelta(days=7))
+        starter_sub = Subgroup(name="새 소분류", tasks=[starter_task])
+        starter_part = Part(name="새 파트", color=config.DEFAULT_PALETTE[0], subgroups=[starter_sub])
+        self.data = WBSData(
+            project_start=today, project_end=today + dt.timedelta(days=7),
+            parts=[starter_part], phases=[],
+        )
         self.project_name = "새 프로젝트"
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._update_title()
-        self.table.setRowCount(0)
-        self.preview_label.setText("파일을 열어 WBS를 파싱하세요.")
-        self.preview_label.setPixmap(QPixmap())
-        self.statusBar().showMessage("새 프로젝트")
+        self._populate_table()
+        self.on_refresh_preview()
+        self.statusBar().showMessage(
+            "새 프로젝트를 시작했습니다. 표에서 직접 수정하거나, "
+            "차트의 소분류 행 영역을 드래그해 작업을 추가할 수 있습니다."
+        )
 
     def on_rename_project(self):
         new_name, ok = QInputDialog.getText(self, "이름 바꾸기", "프로젝트 이름:", text=self.project_name)
@@ -421,8 +457,12 @@ class MainWindow(QMainWindow):
             "   - Delete: 선택한 행 삭제\n"
             "   - 우클릭: 위/아래에 추가, 하위 항목 추가, 삭제\n"
             "   - Ctrl+Z / Ctrl+Shift+Z: 실행 취소 / 다시 실행\n\n"
-            "3. 수정 내용은 오른쪽 미리보기에 자동으로 반영됩니다.\n\n"
-            "4. 파일 > 다른 형식으로 내보내기 에서 PNG/JSON/HTML/draw.io/Excel\n"
+            "3. 오른쪽 미리보기 차트에서도 직접 마우스로 편집할 수 있습니다.\n"
+            "   - 소분류 행 영역을 드래그: 그 구간으로 새 작업 추가\n"
+            "   - 작업 막대 안쪽을 드래그: 막대 이동(일정 전체를 같이 이동)\n"
+            "   - 작업 막대 좌/우 끝을 드래그: 시작일/종료일만 조정\n\n"
+            "4. 수정 내용은 오른쪽 미리보기에 자동으로 반영됩니다.\n\n"
+            "5. 파일 > 다른 형식으로 내보내기 에서 PNG/JSON/HTML/draw.io/Excel\n"
             "   중 원하는 형식으로 저장합니다.\n\n"
             "WBS 분석에 쓸 LLM 모델사와 API 키는 설정 > API 키 변경에서 등록합니다.",
         )
@@ -768,6 +808,64 @@ class MainWindow(QMainWindow):
                 self.on_refresh_preview()
 
     # ---- 미리보기 / 내보내기 ----
+
+    # ---- 미리보기 차트에서 직접 드래그로 편집 ----
+
+    EDGE_GRAB_PX = 6  # 막대 가장자리 근처를 잡았다고 인정하는 픽셀 거리
+
+    def on_preview_drag_finished(self, press_x: int, press_y: int, release_x: int, release_y: int):
+        if not self.data:
+            return
+        self._sync_table_to_data()
+        r = renderer.GanttRenderer(self.data)
+
+        row = next((row for row in r.row_hit_areas() if row["y_top"] <= press_y < row["y_bottom"]), None)
+        if row is None:
+            return
+
+        press_date = r.x_to_date(press_x)
+        release_date = r.x_to_date(release_x)
+
+        if row["kind"] == "subgroup":
+            if press_date == release_date:
+                return  # 드래그 없이 그냥 클릭한 것 -> 무시 (실수로 새 작업이 막 생기지 않게)
+            start, end = sorted((press_date, release_date))
+            self._push_undo()
+            new_task = Task(name="새 작업", start_date=start, end_date=end)
+            row["ref"].tasks.append(new_task)
+            self._focus_and_rename(new_task)
+            self.on_refresh_preview()
+            self.statusBar().showMessage("차트에 새 작업을 추가했습니다. 표에서 이름을 입력하세요.")
+            return
+
+        if row["kind"] == "part":
+            self.statusBar().showMessage("작업을 추가하려면 소분류 행 영역에서 드래그하세요.")
+            return
+
+        # kind == "task": 기존 막대 위/근처를 드래그 -> 이동 또는 좌우 리사이즈
+        task = row["ref"]
+        bar_x1, bar_x2 = row["bar_x1"], row["bar_x2"]
+
+        if abs(press_x - bar_x1) <= self.EDGE_GRAB_PX:
+            new_start, new_end = release_date, task.end_date
+        elif abs(press_x - bar_x2) <= self.EDGE_GRAB_PX:
+            new_start, new_end = task.start_date, release_date
+        elif bar_x1 <= press_x <= bar_x2:
+            delta = release_date - press_date
+            new_start, new_end = task.start_date + delta, task.end_date + delta
+        else:
+            return  # 그 행의 막대와 멀리 떨어진 곳을 클릭함 -> 무시
+
+        if new_start > new_end:
+            new_start, new_end = new_end, new_start
+        if new_start == task.start_date and new_end == task.end_date:
+            return  # 실질적인 변화 없음
+
+        self._push_undo()
+        task.start_date, task.end_date = new_start, new_end
+        self._populate_table()
+        self.on_refresh_preview()
+        self.statusBar().showMessage(f"'{task.name}' 일정을 {new_start} ~ {new_end}로 변경했습니다.")
 
     def on_refresh_preview(self):
         if not self.data:

@@ -184,6 +184,42 @@ class GanttRenderer:
         days_offset = (d - self.grid_start).days
         return config.LABEL_WIDTH + (days_offset / 7) * config.WEEK_WIDTH
 
+    def x_to_date(self, x: float) -> dt.date:
+        """date_to_x의 역함수. 차트 미리보기에서 클릭/드래그한 픽셀 x좌표를
+        날짜로 되돌릴 때 쓴다 (가장 가까운 일 단위로 반올림)."""
+        days_offset = (x - config.LABEL_WIDTH) / config.WEEK_WIDTH * 7
+        return self.grid_start + dt.timedelta(days=round(days_offset))
+
+    def row_hit_areas(self) -> list:
+        """미리보기 이미지에서 마우스 클릭/드래그 픽셀 좌표가 어떤 행(파트/소분류/작업)에
+        해당하는지 알아내기 위한 정보. 각 항목: {kind, ref, parent, y_top, y_bottom,
+        bar_x1, bar_x2}. task 행만 bar_x1/x2(색상 바의 실제 x범위)를 가진다."""
+        rows = []
+        y = config.HEADER_TOTAL_HEIGHT
+        for part in self.data.parts:
+            rows.append({
+                "kind": "part", "ref": part, "parent": None,
+                "y_top": y, "y_bottom": y + config.PART_HEADER_HEIGHT,
+            })
+            y += config.PART_HEADER_HEIGHT
+            for sg in part.subgroups:
+                rows.append({
+                    "kind": "subgroup", "ref": sg, "parent": part,
+                    "y_top": y, "y_bottom": y + config.SUB_ROW_HEIGHT,
+                })
+                y += config.SUB_ROW_HEIGHT
+                for task in sg.tasks:
+                    x1 = self.date_to_x(task.start_date)
+                    days = (task.end_date - task.start_date).days
+                    width = max(config.BAR_MIN_WIDTH, (days / 7) * config.WEEK_WIDTH)
+                    rows.append({
+                        "kind": "task", "ref": task, "parent": sg,
+                        "y_top": y, "y_bottom": y + config.DETAIL_ROW_HEIGHT,
+                        "bar_x1": x1, "bar_x2": x1 + width,
+                    })
+                    y += config.DETAIL_ROW_HEIGHT
+        return rows
+
     def _compute_weeks(self) -> list:
         weeks = []
         cur = self.grid_start
