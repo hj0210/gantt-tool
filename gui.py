@@ -27,7 +27,6 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -244,6 +243,7 @@ class MainWindow(QMainWindow):
         self._undo_stack: list = []
         self._redo_stack: list = []
         self._UNDO_LIMIT = 50
+        self._populating = False
 
         self._build_ui()
         self._update_title()
@@ -255,17 +255,6 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         self._build_menu_bar()
-
-        toolbar = QToolBar()
-        self.addToolBar(toolbar)
-
-        refresh_btn = QPushButton("미리보기 갱신")
-        refresh_btn.clicked.connect(self.on_refresh_preview)
-        toolbar.addWidget(refresh_btn)
-
-        api_key_btn = QPushButton("API 키 변경")
-        api_key_btn.clicked.connect(self.on_change_api_key)
-        toolbar.addWidget(api_key_btn)
 
         central = self._build_central_widget()
         self.setCentralWidget(central)
@@ -325,6 +314,22 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(self.on_redo)
         edit_menu.addAction(self.redo_action)
 
+        settings_menu = self.menuBar().addMenu("설정")
+
+        api_key_action = QAction("API 키 변경", self)
+        api_key_action.triggered.connect(self.on_change_api_key)
+        settings_menu.addAction(api_key_action)
+
+        help_menu = self.menuBar().addMenu("도움말")
+
+        howto_action = QAction("사용법", self)
+        howto_action.triggered.connect(self.on_show_howto)
+        help_menu.addAction(howto_action)
+
+        about_action = QAction("정보", self)
+        about_action.triggered.connect(self.on_show_about)
+        help_menu.addAction(about_action)
+
     def _build_central_widget(self) -> QWidget:
         central = QWidget()
         layout = QHBoxLayout(central)
@@ -343,6 +348,7 @@ class MainWindow(QMainWindow):
         self.table.delete_on_row.connect(self.on_delete_row)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.on_table_context_menu)
+        self.table.itemChanged.connect(self.on_item_changed)
         left.addWidget(self.table)
 
         left_widget = QWidget()
@@ -404,6 +410,32 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.statusBar().showMessage("API 키가 저장되었습니다.")
 
+    def on_show_howto(self):
+        QMessageBox.information(
+            self, "사용법",
+            "1. 파일 > 다음에서 가져오기... 로 WBS 파일을 불러옵니다.\n"
+            "   (Excel/JSON/PDF/이미지/draw.io 지원)\n\n"
+            "2. 왼쪽 표에서 파트/소분류/작업을 확인하고 수정합니다.\n"
+            "   - 더블클릭: 이름/날짜/색상 수정\n"
+            "   - 작업 행에서 Enter: 바로 아래에 새 작업 추가\n"
+            "   - Delete: 선택한 행 삭제\n"
+            "   - 우클릭: 위/아래에 추가, 하위 항목 추가, 삭제\n"
+            "   - Ctrl+Z / Ctrl+Shift+Z: 실행 취소 / 다시 실행\n\n"
+            "3. 수정 내용은 오른쪽 미리보기에 자동으로 반영됩니다.\n\n"
+            "4. 파일 > 다른 형식으로 내보내기 에서 PNG/JSON/HTML/draw.io/Excel\n"
+            "   중 원하는 형식으로 저장합니다.\n\n"
+            "WBS 분석에 쓸 LLM 모델사와 API 키는 설정 > API 키 변경에서 등록합니다.",
+        )
+
+    def on_show_about(self):
+        QMessageBox.information(
+            self, "정보",
+            "WBS → 간트차트 생성기\n\n"
+            "Excel/JSON/PDF/이미지/draw.io로 작성한 WBS 일정표를\n"
+            "간트차트 PNG/JSON/HTML/draw.io/Excel로 변환합니다.\n\n"
+            f"설정 파일 위치: {settings.get_config_path_str()}",
+        )
+
     def on_open_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -459,24 +491,34 @@ class MainWindow(QMainWindow):
     # ---- 테이블 채우기 ----
 
     def _populate_table(self):
-        self.table.setRowCount(0)
-        if not self.data:
-            return
+        self._populating = True  # itemChanged가 프로그램에 의한 채움까지 자동갱신으로 잡지 않게 함
+        try:
+            self.table.setRowCount(0)
+            if not self.data:
+                return
 
-        for part in self.data.parts:
-            self._add_row(ROW_PART, part.name, "", "", part.color, ref=part, parent=None)
-            for sg in part.subgroups:
-                self._add_row(ROW_SUBGROUP, sg.name, "", "", "", ref=sg, parent=part)
-                for task in sg.tasks:
-                    self._add_row(
-                        ROW_TASK,
-                        task.name,
-                        task.start_date.isoformat(),
-                        task.end_date.isoformat(),
-                        "",
-                        ref=task,
-                        parent=sg,
-                    )
+            for part in self.data.parts:
+                self._add_row(ROW_PART, part.name, "", "", part.color, ref=part, parent=None)
+                for sg in part.subgroups:
+                    self._add_row(ROW_SUBGROUP, sg.name, "", "", "", ref=sg, parent=part)
+                    for task in sg.tasks:
+                        self._add_row(
+                            ROW_TASK,
+                            task.name,
+                            task.start_date.isoformat(),
+                            task.end_date.isoformat(),
+                            "",
+                            ref=task,
+                            parent=sg,
+                        )
+        finally:
+            self._populating = False
+
+    def on_item_changed(self, _item):
+        """사용자가 셀을 직접 타이핑해서 수정하면(이름/날짜) 자동으로 미리보기를 갱신한다."""
+        if self._populating or not self.data:
+            return
+        self.on_refresh_preview()
 
     def _add_row(self, kind: str, name: str, start: str, end: str, color: str, ref, parent):
         row = self.table.rowCount()
